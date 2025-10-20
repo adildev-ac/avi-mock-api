@@ -1,0 +1,18 @@
+{
+  "count": 1,
+  "results": [
+    {
+      "_last_modified": "1760803905268851",
+      "enforce_label_group": false,
+      "local": true,
+      "name": "admin",
+      "url": "https://10.158.176.253/api/tenant/admin",
+      "uuid": "admin"
+    }
+  ]
+}
+
+
+
+
+
