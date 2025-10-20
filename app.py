@@ -1,40 +1,52 @@
 import json
-import sqlite3
-from flask import Flask, jsonify, request
 import os
 import copy
 import uuid
 from functools import wraps
+from flask import Flask, jsonify, request
 from werkzeug.security import generate_password_hash, check_password_hash
+import psycopg2
+from psycopg2.extras import RealDictCursor
+
 
 app = Flask(__name__)
 
+
 # --- Database Configuration ---
-# Use an environment variable for the DB path to support persistent disks on hosts like Render.
-DATABASE_FILE = os.getenv('DATABASE_PATH', 'users.db')
+# Railway automatically provides DATABASE_URL for PostgreSQL
+DATABASE_URL = os.getenv('DATABASE_URL')
+
+def get_db_connection():
+    """Creates and returns a database connection."""
+    conn = psycopg2.connect(DATABASE_URL)
+    return conn
+
 
 def init_db():
     """Initializes the database and creates the users table if it doesn't exist."""
-    print(f"Initializing database at {DATABASE_FILE}...")
+    print("Initializing database...")
     try:
-        conn = sqlite3.connect(DATABASE_FILE)
+        conn = get_db_connection()
         cursor = conn.cursor()
         # Create table
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS users (
-                username TEXT PRIMARY KEY NOT NULL,
-                password_hash TEXT NOT NULL
+                username VARCHAR(255) PRIMARY KEY NOT NULL,
+                password_hash VARCHAR(255) NOT NULL
             );
         ''')
         conn.commit()
+        cursor.close()
         conn.close()
         print("Database initialized successfully.")
     except Exception as e:
         print(f"Error initializing database: {e}")
 
+
 # --- In-Memory Data Store ---
 INITIAL_STATE = {}
-USER_SESSIONS = {} # This will store data per user token
+USER_SESSIONS = {}  # This will store data per user token
+
 
 def load_initial_data():
     """Loads data from JSON files into the initial state template on startup."""
@@ -56,11 +68,13 @@ def load_initial_data():
             INITIAL_STATE[key] = {}
     print("Initial data loaded and ready.")
 
+
 # --- Authentication ---
+
 
 @app.route('/register', methods=['POST'])
 def register():
-    """Registers a new user in the SQLite database."""
+    """Registers a new user in the PostgreSQL database."""
     data = request.get_json()
     if not data or not data.get('username') or not data.get('password'):
         return jsonify({"message": "Username and password are required in the JSON body"}), 400
@@ -68,18 +82,20 @@ def register():
     username = data['username']
     password = data['password']
     
-    conn = sqlite3.connect(DATABASE_FILE)
+    conn = get_db_connection()
     cursor = conn.cursor()
 
-    cursor.execute("SELECT username FROM users WHERE username = ?", (username,))
+    cursor.execute("SELECT username FROM users WHERE username = %s", (username,))
     if cursor.fetchone():
+        cursor.close()
         conn.close()
         return jsonify({"message": "User already exists. Please login."}), 409
 
     hashed_password = generate_password_hash(password)
-    cursor.execute("INSERT INTO users (username, password_hash) VALUES (?, ?)", (username, hashed_password))
+    cursor.execute("INSERT INTO users (username, password_hash) VALUES (%s, %s)", (username, hashed_password))
     
     conn.commit()
+    cursor.close()
     conn.close()
     
     print(f"New user registered: '{username}'")
@@ -107,6 +123,7 @@ def token_required(f):
         return f(user_data, *args, **kwargs)
     return decorated
 
+
 @app.route('/login', methods=['POST'])
 def login():
     """Authenticates a user against the DB and provides a session token."""
@@ -114,10 +131,11 @@ def login():
     if not auth or not auth.username or not auth.password:
         return jsonify({"message": "Could not verify"}), 401, {'WWW-Authenticate': 'Basic realm="Login required!"'}
 
-    conn = sqlite3.connect(DATABASE_FILE)
+    conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT password_hash FROM users WHERE username = ?", (auth.username,))
+    cursor.execute("SELECT password_hash FROM users WHERE username = %s", (auth.username,))
     user_record = cursor.fetchone()
+    cursor.close()
     conn.close()
 
     if not user_record or not check_password_hash(user_record[0], auth.password):
@@ -128,27 +146,33 @@ def login():
     print(f"User '{auth.username}' logged in. Token: {token}")
     return jsonify({"token": token})
 
-# --- API Endpoints (No changes needed below this line) ---
+
+# --- API Endpoints ---
+
 
 @app.route('/api/tenant', methods=['GET'])
 @token_required
 def get_tenants(user_data):
     return jsonify(user_data.get('tenant', {}))
 
+
 @app.route('/api/cloud', methods=['GET'])
 @token_required
 def get_clouds(user_data):
     return jsonify(user_data.get('cloud', {}))
+
 
 @app.route('/api/virtualservice', methods=['GET'])
 @token_required
 def get_virtualservices(user_data):
     return jsonify(user_data.get('virtualservice', {}))
 
+
 @app.route('/api/serviceengine', methods=['GET'])
 @token_required
 def get_serviceengines(user_data):
     return jsonify(user_data.get('serviceengine', {}))
+
 
 @app.route('/api/virtualservice/<string:uuid>', methods=['GET', 'PUT'])
 @token_required
@@ -180,5 +204,6 @@ def get_or_update_virtualservice_by_uuid(user_data, uuid):
 if __name__ == '__main__':
     init_db()
     load_initial_data()
-    app.run(debug=True, port=5000)
-
+    # Use PORT environment variable provided by Railway
+    port = int(os.getenv('PORT', 5000))
+    app.run(host='0.0.0.0', debug=False, port=port)
