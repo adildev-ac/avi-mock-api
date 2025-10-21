@@ -19,8 +19,14 @@ def healthcheck():
 DATABASE_URL = os.getenv('DATABASE_URL')
 
 def get_db_connection():
-    conn = psycopg2.connect(DATABASE_URL)
-    return conn
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        print("Database connection established.")
+        return conn
+    except Exception as e:
+        print("Database connection failed:", e)
+        raise
+
 
 def init_db():
     print("Initializing database...")
