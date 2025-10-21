@@ -174,7 +174,16 @@ def get_or_update_virtualservice_by_uuid(user_data, uuid):
         return jsonify(vs_data)
 
 if __name__ == '__main__':
-    init_db()
-    load_initial_data()
-    port = int(os.getenv('PORT', 5000))
-    app.run(host='0.0.0.0', debug=False, port=port)
+    try:
+        print("DEBUG: Starting app initialization")
+        init_db()
+        load_initial_data()
+        print("DEBUG: Finished app initialization")
+        port = int(os.getenv('PORT', 5000))
+        app.run(host='0.0.0.0', debug=True, port=port)
+    except Exception as e:
+        print("DEBUG: Fatal error during startup...", e)
+        import traceback
+        traceback.print_exc()
+        raise
+
